@@ -1,6 +1,7 @@
 from pynput.mouse import Listener
-from PIL import Image
-from random import randint
+from PIL import Image, ImageGrab
+from random import randint, randrange
+from CommonTools import screenToImgRect
 import cv2
 import numpy as np
 
@@ -10,6 +11,10 @@ dim = (1920.0, 1080.0)
 # need to be converted
 infinite_up = (625, 490)
 infinite_down = (913,594)
+# Yolo Region, need to be converted
+yolo_up = (530, 462)
+yolo_down = (796, 589)
+
 
 class CardLabeler:
     def __init__(self):
@@ -72,7 +77,7 @@ def SelectFrames(fname, skip = 10):
         success, image = vidcap.read()
 
 # draw convex hull
-def ConvexHull(val, img):
+def ConvexHull(val, img, indices = None):
     threshold = val
     src = np.array(img)
     src_gray = cv2.cvtColor(src, cv2.COLOR_RGB2GRAY)
@@ -89,8 +94,8 @@ def ConvexHull(val, img):
         drawing = np.zeros((canny_output.shape[0], canny_output.shape[1], 3), dtype=np.uint8)
         cv2.drawContours(drawing, contours, i, (255,0,0))
         dimg = Image.fromarray(np.uint8(drawing))
-        dimg.show()
-        cmd = input(str(contours[i].shape))
+        #dimg.show()
+        #cmd = input(str(contours[i].shape))
         #if cmd = '1':
             #contour_list[1].append(contours[i])
             #if len(contor_list) == 2:
@@ -100,6 +105,11 @@ def ConvexHull(val, img):
     # Draw contours + hull results
     #
     result_hulls = []
+    if indices != None:
+        for i in indices:
+            result_hulls.append(hull_list[i])
+        return result_hulls
+
     for i in range(len(contours)):
         #drawing = np.copy(canny_output)
         drawing = np.zeros((canny_output.shape[0], canny_output.shape[1], 3), dtype=np.uint8)
@@ -118,46 +128,137 @@ def ConvexHull(val, img):
     return result_hulls
 
 class UnitCard:
-    def __init__(self, fname):
-        self.img = Image.open(fname)
+    def __init__(self, arg):
+        filename = ""
+        hull_indices = None
+        # Accept a list or a string as parameter
+        if type(arg) == type(""):
+            filename = arg
+        else:
+            # extract filename from parameter.
+            filename = arg[0]
+            self.label = int(arg[-1])
+            hull_indices = []
+            for i in arg[1:-1]:
+                hull_indices.append(int(i))
+        
+
+        self.img = Image.open(filename)
         self.imgarray = np.array(self.img)
-        self.hulls = ConvexHull(50, self.img)
+        self.hulls = ConvexHull(70, self.img, hull_indices)
         self.bbox = []
         # self.UpdateBBox()
-        self.extended = np.zeros((115,352,3),dtype=np.uint8)
-        self.reverse_mask = np.zeros((115,352,3),dtype=np.uint8)
+        self.__CreateExtendAndMask()
+        self.__Centralize()
+
+        # backup centralized data
+        self.base_hulls = []
+        for i in self.hulls:
+            h = np.copy(i)
+            self.base_hulls.append(h)
+        self.base_img = np.copy(self.extended)
+        self.base_mask = np.copy(self.mask_positive)
+        #self.UpdateBBox()
+
+    def Reset(self):
+        self.extended = np.copy(self.base_img)
+        self.mask_positive = np.copy(self.base_mask)
+        self.hulls.clear()
+        for h in self.base_hulls:
+            newh = np.copy(h)
+            self.hulls.append(newh)
+
+    def __CreateExtendAndMask(self):
+        pts = screenToImgRect(yolo_up, yolo_down, ImageGrab.grab())
+        height = int(pts[3] - pts[1])
+        width = int(pts[2] - pts[0])
+        # Create Extended img
+        self.extended = np.zeros((height,width,3),dtype=np.uint8)
         self.extended[:self.imgarray.shape[0], :self.imgarray.shape[1]] = self.imgarray
         self.xoff = int(self.extended.shape[1]/2 - self.imgarray.shape[1]/2)
         self.yoff = int(self.extended.shape[0]/2 - self.imgarray.shape[0]/2)
-        self.__Centralize()
-        #self.UpdateBBox()
-        
-    def __UpdateConvexHull(self, M):
+        # Create Mask
+        self.mask_positive = np.zeros((height,width,3), dtype=np.uint8)
+        self.mask_positive[:self.imgarray.shape[0],:self.imgarray.shape[1]] = 1
+
+    def __UpdateConvexHull(self, M, affine = True):
         # Update convex hull
         new_hull = []
+        
         for h in self.hulls:
             hull_matrix = np.zeros((h.shape[0],h.shape[1],h.shape[2]+1)).transpose()
             hull_matrix[:2,:,:] = h.transpose()
             hull_matrix[2,:,:] = 1
-            new_hull.append(np.dot(M,hull_matrix.reshape((3,h.shape[0]))).reshape((2,1,h.shape[0])).transpose())
+            if affine == True:
+                new_hull.append(np.dot(M,hull_matrix.reshape((3,h.shape[0]))).reshape((2,1,h.shape[0])).transpose())
+            else:
+                new_hull.append(np.dot(M,hull_matrix.reshape((3,h.shape[0])))[:2].reshape((2,1,h.shape[0])).transpose())
+        '''
+        for h in self.hulls:
+            hshape = h.shape
+            if affine == True:
+                new_hull.append(cv2.warpAffine(h.reshape(hshape[0],hshape[2]), M, (hshape[0],hshape[2])).reshape(hshape))
+            else:
+                new_hull.append(cv2.warpPerspective(h.reshape(hshape[0],hshape[2]), M, (hshape[0],hshape[2])).reshape(hshape))
+        '''
         self.hulls = new_hull
 
     def Translate(self, x, y):
         M = np.float32([[1,0,x],[0,1,y]])
         for i in range(3):
             self.extended[:,:,i] = cv2.warpAffine(self.extended[:,:,i],M,(self.extended.shape[1], self.extended.shape[0]))
+            self.mask_positive[:,:,i] = cv2.warpAffine(self.mask_positive[:,:,i],M,(self.extended.shape[1], self.extended.shape[0]))
         
         self.__UpdateConvexHull(M)
+    
+    def RandomTrans(self):
+        diag = np.sqrt(self.img.size[0]**2 + self.img.size[1]**2)
+        xlimit = int((self.extended.shape[1] - diag) / 2)
+        ylimit = int((self.extended.shape[0] - diag) /2)
+        self.Translate(randrange(-xlimit, xlimit), randrange(-ylimit,ylimit))
     
     def Rotate(self, theta):
         h = self.extended.shape[0]
         w = self.extended.shape[1]
         M = cv2.getRotationMatrix2D(((w-1.0)/2,(h-1.0)/2),theta,1)
+        #print("R shape:", M.shape)
 
         for i in range(3):
             self.extended[:,:,i] = cv2.warpAffine(self.extended[:,:,i], M ,(w,h))
+            self.mask_positive[:,:,i] = cv2.warpAffine(self.mask_positive[:,:,i],M,(w,h))
         
         self.__UpdateConvexHull(M)
+    
+    # Only on centralized images
+    def Perspective(self, oldpts, newpts):
+        h = self.extended.shape[0]
+        w = self.extended.shape[1]
+        M = cv2.getPerspectiveTransform(oldpts, newpts)
+        #print("P shape:",M.shape)
+
+        for i in range(3):
+            self.extended[:,:,i] = cv2.warpPerspective(self.extended[:,:,i], M, (w,h))
+            self.mask_positive[:,:,i] = cv2.warpPerspective(self.mask_positive[:,:,i],M,(w,h))
+
+        self.__UpdateConvexHull(M, False)
+    
+    # Randomized perspective
+    def RandPerspective(self, deviation):
+        pts1 = np.float32([[self.xoff, self.yoff],[self.xoff + self.imgarray.shape[1], self.yoff],[self.xoff, self.yoff + self.imgarray.shape[0]],[self.xoff+self.imgarray.shape[1], self.yoff+self.imgarray.shape[0]]])
+        #deviate_pts = np.float32([[randrange(-deviation, deviation+1), randrange(-deviation, deviation+1)],[randrange(-deviation, deviation+1), randrange(-deviation, deviation+1)],[0,0],[0,0]])
+        #sigma_x = randrange(-deviation,deviation+1)
+        sigma_x = 0
+        sigma_y = randrange(0,deviation+1)
+        deviate_pts = np.float32([[-sigma_x,-sigma_y],[sigma_x, -sigma_y],[0,0],[0,0]])
+        pts2 = pts1 + deviate_pts
+
+        self.Perspective(pts1, pts2)
+    
+    def RandTransform(self):
+        self.RandPerspective(int(self.img.size[1]/2))
+        self.Rotate(randrange(0,360))
+        self.RandomTrans()
+        self.UpdateBBox()
         
     def __Centralize(self):
         self.Translate(self.xoff, self.yoff)
@@ -169,18 +270,54 @@ class UnitCard:
         #self.reverse_mask[:self.imgarray.shape[0],:self.imgarray.shape[1]] = 0
         #tempimg = Image.fromarray(np.uint8(self.reverse_mask))
         tempimg.show()
-    def UpdateBBox(self):
+    def UpdateBBox(self, show_box = False):
         temp_img = np.copy(self.extended)
         self.bbox.clear()
+        '''
         for i in self.hulls:
-            min0 = int(min(i[:,0,0])-1)
-            max0 = int(max(i[:,0,0])+1)
-            min1 = int(min(i[:,0,1])-1)
-            max1 = int(max(i[:,0,1])+1)
+            min0 = int(min(i[:,0,0])-2)
+            max0 = int(max(i[:,0,0])+2)
+            min1 = int(min(i[:,0,1])-2)
+            max1 = int(max(i[:,0,1])+2)
             self.bbox.append(((min0,min1),(max0,max1)))
             temp_img = cv2.rectangle(temp_img, self.bbox[-1][0],self.bbox[-1][1],(255,0,0),1)
-        temp_IMG = Image.fromarray(np.uint8(temp_img))
-        temp_IMG.show()    
+            '''
+        min0 = max0 = min1 = max1 = None
+        for i in self.hulls:
+            tmin0 = int(min(i[:,0,0]))
+            tmax0 = int(max(i[:,0,0]))
+            tmin1 = int(min(i[:,0,1]))
+            tmax1 = int(max(i[:,0,1]))
+            if min0 == None:
+                min0 = tmin0
+                min1 = tmin1
+                max0 = tmax0
+                max1 = tmax1
+            else:
+                min0 = min(min0,tmin0)
+                min1 = min(min1,tmin1)
+                max0 = max(max0, tmax0)
+                max1 = max(max1, tmax1)
+        self.bbox.append(((min0-2, min1-2),(max0+2,max1+2)))
+        if show_box == True:
+            temp_img = cv2.rectangle(temp_img, self.bbox[-1][0],self.bbox[-1][1],(255,0,0),1)
+            temp_IMG = Image.fromarray(np.uint8(temp_img))
+            temp_IMG.show()    
 
+    def Overlay(self, array):
+        # Generate negative mask
+        negative_mask = np.vectorize(lambda x: 1 if x < 1 else 0)(self.mask_positive)
+        imgarray = array * negative_mask + self.extended
 
+        # Show it
+        temp_img = Image.fromarray(np.uint8(imgarray))
+        temp_img.show()
+        return imgarray
+
+    def OverlyOnBackground(self, fname):
+        img = Image.open(fname)
+        if img.size[0] >= self.extended.shape[1] and img.size[1] >= self.extended.shape[0]:
+            # Convert to nparray
+            imgarray = np.array(img.crop((0,0,self.extended.shape[1],self.extended.shape[0]))) 
+            return Overlay(imgarray)
 

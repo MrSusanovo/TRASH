@@ -9,7 +9,7 @@ rectDealerPoint = Rect((554,517),(574,534))
 rectInsureBox = Rect((699,442),(726,455))
 rectDealCard = Rect((744,554),(762,568))
 
-rectCaptureRegion = Rect((627,439),(909,585))
+rectCaptureRegion = Rect((530, 462),(796, 589))
 
 dealerHolePos = (570,483)
 dealerHoleColor = (152,152,150)

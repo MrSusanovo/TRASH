@@ -134,6 +134,7 @@ class UnitCard:
         # Accept a list or a string as parameter
         if type(arg) == type(""):
             filename = arg
+            self.label = None
         else:
             # extract filename from parameter.
             filename = arg[0]
@@ -142,7 +143,7 @@ class UnitCard:
             for i in arg[1:-1]:
                 hull_indices.append(int(i))
         
-
+        self.labels = []
         self.img = Image.open(filename)
         self.imgarray = np.array(self.img)
         self.hulls = ConvexHull(70, self.img, hull_indices)
@@ -164,9 +165,12 @@ class UnitCard:
         self.extended = np.copy(self.base_img)
         self.mask_positive = np.copy(self.base_mask)
         self.hulls.clear()
+        self.bbox = []
+        self.labels = []
         for h in self.base_hulls:
             newh = np.copy(h)
             self.hulls.append(newh)
+        self.UpdateBBox()
 
     def __CreateExtendAndMask(self):
         pts = screenToImgRect(yolo_up, yolo_down, ImageGrab.grab())
@@ -256,12 +260,13 @@ class UnitCard:
     
     def RandTransform(self):
         self.RandPerspective(int(self.img.size[1]/2))
-        self.Rotate(randrange(0,360))
+        self.Rotate(randrange(-90,91))
         self.RandomTrans()
         self.UpdateBBox()
         
     def __Centralize(self):
         self.Translate(self.xoff, self.yoff)
+        self.UpdateBBox()
 
     def CreateMask(self):
         self.reverse_mask *= 0
@@ -299,25 +304,95 @@ class UnitCard:
                 max0 = max(max0, tmax0)
                 max1 = max(max1, tmax1)
         self.bbox.append(((min0-2, min1-2),(max0+2,max1+2)))
+        if self.label != None:
+            self.labels.append(self.label)
         if show_box == True:
             temp_img = cv2.rectangle(temp_img, self.bbox[-1][0],self.bbox[-1][1],(255,0,0),1)
             temp_IMG = Image.fromarray(np.uint8(temp_img))
-            temp_IMG.show()    
+            temp_IMG.show()
 
-    def Overlay(self, array):
+    def OverlayImg(self, array, show = False):
         # Generate negative mask
         negative_mask = np.vectorize(lambda x: 1 if x < 1 else 0)(self.mask_positive)
         imgarray = array * negative_mask + self.extended
 
         # Show it
-        temp_img = Image.fromarray(np.uint8(imgarray))
-        temp_img.show()
+        if show == True:
+            #temp_img = Image.fromarray(np.uint8(imgarray))
+            #temp_img.show()
+            self.DrawBBox(imgarray)
         return imgarray
+    
+    def DrawBBox(self,array):
+        temp_img = np.copy(array)
+        for box in self.bbox:
+            temp_img = cv2.rectangle(temp_img, box[0],box[1],(255,0,0),1)
+        temp_IMG = Image.fromarray(np.uint8(temp_img))
+        temp_IMG.show()
 
-    def OverlyOnBackground(self, fname):
+    
+    def OverlayCard(self, card, show = False):
+        other_region = np.copy(card.mask_positive[:,:,0])
+        other_sum = sum(sum(other_region))
+        newboxes = []
+        newlabels = []
+        # determin if card covers existing boxes
+        for box in self.bbox:
+            boxmask = np.copy(self.mask_positive[:,:,0])
+            boxmask *= 0
+            # Watchout, np array are y x chanenl
+            boxmask[box[0][1]:box[1][1]+1, box[0][0]:box[1][0]+1] = 1
+            boxsum = sum(sum(boxmask))
+            new_mask = np.vectorize(lambda x: 1 if x >= 1 else 0)(boxmask + other_region)
+            # new_mask_img = Image.fromarray(np.uint8(new_mask * 255))
+            # new_mask_img.show()
+            newsum = sum(sum(new_mask))
+            if newsum == (other_sum + boxsum):
+                newboxes.append(box)
+                newlabels.append(self.label)
+        self.bbox = newboxes
+        self.labels = newlabels
+        # copy boxes from the other image
+        for box in card.bbox:
+            self.bbox.append(box)
+            self.labels.append(card.label)
+        self.extended = card.OverlayImg(self.extended)
+        # update positive mask
+        self.mask_positive = np.vectorize(lambda x: 1 if x >= 1 else 0)(self.mask_positive + card.mask_positive)
+        if show == True:
+            '''
+            temp_img = np.copy(self.extended)
+            for box in self.bbox:
+                temp_img = cv2.rectangle(temp_img, box[0],box[1],(255,0,0),1)
+            temp_IMG = Image.fromarray(np.uint8(temp_img))
+            temp_IMG.show()
+            '''
+            self.DrawBBox(self.extended)
+
+
+    def GetAnotation(self):
+        objects = []
+        index = 0
+        for box in self.bbox:
+            anotation = str(self.labels[index])
+            width = box[1][0] - box[0][0]
+            xcenter = (box[1][0] + box[0][0])/2.0
+            height = box[1][1] - box[0][1]
+            ycenter = (box[1][1] + box[0][1])/2.0
+
+            r_width = width/self.extended.shape[1]
+            r_height = height/self.extended.shape[0]
+            r_x = xcenter/self.extended.shape[1]
+            r_y = ycenter/self.extended.shape[0]
+            anotation += " " + str(r_x) + " " + str(r_y) + " " + str(r_width) + " " + str(r_height)
+            objects.append(anotation)
+            index += 1
+        return objects
+
+    def OverlayOnBackground(self, fname, show=False):
         img = Image.open(fname)
         if img.size[0] >= self.extended.shape[1] and img.size[1] >= self.extended.shape[0]:
             # Convert to nparray
             imgarray = np.array(img.crop((0,0,self.extended.shape[1],self.extended.shape[0]))) 
-            return Overlay(imgarray)
+            return self.OverlayImg(imgarray, show)
 

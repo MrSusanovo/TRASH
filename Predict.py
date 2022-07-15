@@ -1,0 +1,133 @@
+import numpy as np
+from CommonTools import *
+from YoloTools import yolo_down, yolo_up
+import cv2
+import time
+# Constants.
+INPUT_WIDTH = 640
+INPUT_HEIGHT = 640
+SCORE_THRESHOLD = 0.5
+NMS_THRESHOLD = 0.45
+CONFIDENCE_THRESHOLD = 0.2
+
+# Text parameters.
+FONT_FACE = cv2.FONT_HERSHEY_SIMPLEX
+FONT_SCALE = 0.5
+THICKNESS = 1
+
+# Colors.
+BLACK  = (0,0,0)
+BLUE   = (255,178,50)
+YELLOW = (0,255,255)
+
+pa = (537,468)
+pb = (831, 595)
+classes = ['1','2','3','4','5','6','7','8','9','10','11','12','13']
+def cropMatrix(img, rect):
+    w = int(rect[2]-rect[0]) + 1
+    h = int(rect[3]-rect[1]) + 1
+    new_img = np.zeros((h,w,3))
+    new_img += img[int(rect[1]):int(rect[3]),int(rect[0]):int(rect[2]),:]
+    canvas = np.zeros((640,640,3))
+    canvas[:h,:w,:] = new_img
+    return canvas
+
+
+def draw_label(im, label, x, y):
+    """Draw text onto image at location."""
+    # Get text size.
+    text_size = cv2.getTextSize(label, FONT_FACE, FONT_SCALE, THICKNESS)
+    dim, baseline = text_size[0], text_size[1]
+    # Use text size to create a BLACK rectangle.
+    cv2.rectangle(im, (x,y), (x + dim[0], y + dim[1] + baseline), (0,0,0), cv2.FILLED);
+    # Display text inside the rectangle.
+    cv2.putText(im, label, (x, y + dim[1]), FONT_FACE, FONT_SCALE, YELLOW, THICKNESS, cv2.LINE_AA)
+
+def post_process(input_image, outputs):
+    # Lists to hold respective values while unwrapping.
+    class_ids = []
+    confidences = []
+    boxes = []
+    # Rows.
+    rows = outputs[0].shape[1]
+    image_height, image_width = input_image.shape[:2]
+    # Resizing factor.
+    x_factor = image_width / INPUT_WIDTH
+    y_factor =  image_height / INPUT_HEIGHT
+    # Iterate through detections.
+    for r in range(rows):
+        row = outputs[0][0][r]
+        confidence = row[4]
+        # Discard bad detections and continue.
+        if confidence >= CONFIDENCE_THRESHOLD:
+            classes_scores = row[5:]
+            # Get the index of max class score.
+            class_id = np.argmax(classes_scores)
+            #  Continue if the class score is above threshold.
+            if (classes_scores[class_id] > SCORE_THRESHOLD):
+                confidences.append(confidence)
+                class_ids.append(class_id)
+                cx, cy, w, h = row[0], row[1], row[2], row[3]
+                left = int((cx - w/2) * x_factor)
+                top = int((cy - h/2) * y_factor)
+                width = int(w * x_factor)
+                height = int(h * y_factor)
+                box = np.array([left, top, width, height])
+                boxes.append(box)
+     # Perform non maximum suppression to eliminate redundant, overlapping boxes with lower confidences.
+    indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
+    for i in indices:
+        box = boxes[i]
+        left = box[0]
+        top = box[1]
+        width = box[2]
+        height = box[3]             
+        # Draw bounding box.             
+        cv2.rectangle(input_image, (left, top), (left + width, top + height), BLUE, THICKNESS)
+        # Class label.                      
+        label = "{}:{:.2f}".format(classes[class_ids[i]], confidences[i])             
+        # Draw label.             
+        draw_label(input_image, label, left+width, top+height)
+    return input_image
+
+net = cv2.dnn.readNet('last.onnx')
+
+def cropAndSave(fname):
+    img = Image.open(fname)
+    #subimg = img.crop(screenToImgRect(yolo_up,yolo_down,img))
+    subimg = img.crop(screenToImgRect(pa,pb,img))
+    subimg.save('test1.png')
+
+def predictFromFile(fname):
+    canvas = cv2.imread(fname)
+    result = predict(canvas)
+    cv2.imwrite('predict1.png',r)
+
+def predict(canvas):
+    blob = cv2.dnn.blobFromImage(canvas, 1/255,(640,640),[0,0,0],1, crop=False)
+    net.setInput(blob)
+    outputs = net.forward(net.getUnconnectedOutLayersNames())
+    r = post_process(canvas.copy(),outputs)
+    return r
+
+def cropAndPredict(fname):
+    cropAndSave(fname)
+    predictFromFile('test1.png')
+
+def predictVideo(fname):
+    vidcap = cv2.VideoCapture(fname)
+    success, image = vidcap.read()
+    count = 0
+    dim_img = ImageGrab.grab()
+    rect = [ int(i) for i in screenToImgRect(pa,pb,dim_img) ]
+    w = int(rect[2] - rect[0])
+    h = int(rect[3] - rect[1])
+    fourcc = cv2.VideoWriter_fourcc('m','p','4','v')
+    vidwriter = cv2.VideoWriter('outvid.mp4', fourcc, 30.0, (w,h))
+    while success:
+        new_img = predict(image[rect[1]:rect[3],rect[0]:rect[2],:])
+        vidwriter.write(new_img)
+        success, image = vidcap.read()
+    vidwriter.release()
+
+def realtimePredict()

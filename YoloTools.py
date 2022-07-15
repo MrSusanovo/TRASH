@@ -1,6 +1,6 @@
-from pynput.mouse import Listener
+#from pynput.mouse import Listener
 from PIL import Image, ImageGrab
-from random import randint, randrange
+from random import randint, randrange, uniform
 from CommonTools import screenToImgRect
 import cv2
 import numpy as np
@@ -15,7 +15,7 @@ infinite_down = (913,594)
 yolo_up = (530, 462)
 yolo_down = (796, 589)
 
-
+'''
 class CardLabeler:
     def __init__(self):
         self.point_buffer = []
@@ -75,7 +75,7 @@ def SelectFrames(fname, skip = 10):
         elif cmd == 's':
             break
         success, image = vidcap.read()
-
+'''
 # draw convex hull
 def ConvexHull(val, img, indices = None):
     threshold = val
@@ -252,29 +252,24 @@ class UnitCard:
         #deviate_pts = np.float32([[randrange(-deviation, deviation+1), randrange(-deviation, deviation+1)],[randrange(-deviation, deviation+1), randrange(-deviation, deviation+1)],[0,0],[0,0]])
         #sigma_x = randrange(-deviation,deviation+1)
         sigma_x = 0
-        sigma_y = randrange(0,deviation+1)
+        sigma_y = randrange(-deviation,deviation+1)
         deviate_pts = np.float32([[-sigma_x,-sigma_y],[sigma_x, -sigma_y],[0,0],[0,0]])
         pts2 = pts1 + deviate_pts
 
         self.Perspective(pts1, pts2)
     
-    def RandTransform(self):
+    def RandTransform(self, show = False):
         self.RandPerspective(int(self.img.size[1]/2))
         self.Rotate(randrange(-90,91))
         self.RandomTrans()
-        self.UpdateBBox()
+        gamma = uniform(0.25,2.5)
+        self.AdjustGamma(gamma)
+        self.UpdateBBox(show)
         
     def __Centralize(self):
         self.Translate(self.xoff, self.yoff)
         self.UpdateBBox()
 
-    def CreateMask(self):
-        self.reverse_mask *= 0
-        self.reverse_mask += 255
-        self.extended 
-        #self.reverse_mask[:self.imgarray.shape[0],:self.imgarray.shape[1]] = 0
-        #tempimg = Image.fromarray(np.uint8(self.reverse_mask))
-        tempimg.show()
     def UpdateBBox(self, show_box = False):
         temp_img = np.copy(self.extended)
         self.bbox.clear()
@@ -303,7 +298,8 @@ class UnitCard:
                 min1 = min(min1,tmin1)
                 max0 = max(max0, tmax0)
                 max1 = max(max1, tmax1)
-        self.bbox.append(((min0-2, min1-2),(max0+2,max1+2)))
+        #self.bbox.append(((min0-2, min1-2),(max0+2,max1+2)))
+        self.bbox.append(((min0, min1),(max0,max1)))
         if self.label != None:
             self.labels.append(self.label)
         if show_box == True:
@@ -337,7 +333,16 @@ class UnitCard:
         newboxes = []
         newlabels = []
         # determin if card covers existing boxes
+        counter = 0
         for box in self.bbox:
+            if box[0][0] < 0 or box[0][1] < 0 or box[0][1] < 0 or box[1][1] < 0:
+                print("out of range box:", box)
+                continue
+            myw = self.extended.shape[1]
+            myh = self.extended.shape[0]
+            if box[0][0] > myw or box[1][0] > myw or box[0][1] > myh or box[1][1] > myh:
+                print("out of range box 2:", box, "w,h", myw, myh)
+                continue
             boxmask = np.copy(self.mask_positive[:,:,0])
             boxmask *= 0
             # Watchout, np array are y x chanenl
@@ -347,15 +352,20 @@ class UnitCard:
             # new_mask_img = Image.fromarray(np.uint8(new_mask * 255))
             # new_mask_img.show()
             newsum = sum(sum(new_mask))
-            if newsum == (other_sum + boxsum):
+            if abs(newsum - (other_sum + boxsum)) < 60:
                 newboxes.append(box)
-                newlabels.append(self.label)
+                newlabels.append(self.labels[counter])
+            else:
+                print("Overlap box, newsum:", newsum, "expected:", other_sum+boxsum)
+            counter += 1
         self.bbox = newboxes
         self.labels = newlabels
         # copy boxes from the other image
+        counter = 0
         for box in card.bbox:
             self.bbox.append(box)
-            self.labels.append(card.label)
+            self.labels.append(card.labels[counter])
+            counter += 1
         self.extended = card.OverlayImg(self.extended)
         # update positive mask
         self.mask_positive = np.vectorize(lambda x: 1 if x >= 1 else 0)(self.mask_positive + card.mask_positive)
@@ -384,7 +394,7 @@ class UnitCard:
             r_height = height/self.extended.shape[0]
             r_x = xcenter/self.extended.shape[1]
             r_y = ycenter/self.extended.shape[0]
-            anotation += " " + str(r_x) + " " + str(r_y) + " " + str(r_width) + " " + str(r_height)
+            anotation += " " + str(r_x) + " " + str(r_y) + " " + str(r_width) + " " + str(r_height) +'\n'
             objects.append(anotation)
             index += 1
         return objects
@@ -395,4 +405,61 @@ class UnitCard:
             # Convert to nparray
             imgarray = np.array(img.crop((0,0,self.extended.shape[1],self.extended.shape[0]))) 
             return self.OverlayImg(imgarray, show)
+    
+    def AdjustGamma(self,gamma):
+        inv_gamma = 1.0/gamma
+        table = np.array([((i/255.0) ** inv_gamma) * 255 for i in np.arange(0,256)]).astype('uint8')
+        self.extended = cv2.LUT(self.extended, table)
 
+def ReadinUnitCards(hull_file):
+    f = open(hull_file,"r")
+    lines = map(lambda x: x.replace('\n',''), f.readlines()[:-1])
+    params = [ x.split(' ') for x in lines ]
+    cards = []
+    for param in params:
+        newparam = param
+        newparam[0] = 'Data/UnitCards/' + param[0]
+        cards.append(UnitCard(newparam))
+    return cards
+
+def RandomOverlay(cards, backgrounds, counter):
+    count = randrange(1,5)
+    samples = []
+    indices = {}
+    for i in range(count):
+        index = randrange(len(cards))
+        while indices.get(i) != None:
+            index = randrange(len(cards))
+        print("pick card:",index)
+        indices[index] = 1
+        samples.append(cards[index])
+    for card in samples:
+        card.RandTransform()
+    base_card = samples[0]
+    for card in samples[1:]:
+        base_card.OverlayCard(card)
+    
+    
+    coin = randrange(0,101)
+    path = 'train/'
+    if coin < 20:
+        path = 'test/' if coin < 10 else 'valid/'
+
+    # write anotation file
+    f = open(path+'labels/img'+str(counter) + '.txt','w')
+    f.writelines(base_card.GetAnotation())
+    f.close()
+    # Save image
+    imgarray = base_card.OverlayOnBackground(backgrounds[randrange(len(backgrounds))])
+    cv2.imwrite(path+'images/img'+str(counter) + '.png',imgarray)
+
+    #for card in samples:
+        #card.Reset()
+    #return base_card
+    #print(base_card.GetAnotation())
+    #for card in samples:
+        #card.Reset()
+
+def ResetCards(cards):
+    for card in cards:
+        card.Reset()

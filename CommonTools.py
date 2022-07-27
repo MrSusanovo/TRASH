@@ -1,13 +1,16 @@
 from ctypes import windll, Structure, c_long, byref
-import win32api, win32con, re, winsound
+import win32api, win32con, re, winsound, win32gui
 from pytesseract import pytesseract
 import numpy as np
-import cv2
+import cv2, time
 from PIL import ImageGrab, Image
+from BlackJack import *
 
 # Screen Dimension
 screenWidth = windll.user32.GetSystemMetrics(0)
 screenHeight = windll.user32.GetSystemMetrics(1)
+
+defaultDC = win32gui.GetDC(win32gui.GetActiveWindow())
 
 # tesseract config
 tconfig = "-c tessedit_char_whitelist=0123456789/ --psm 9"
@@ -37,10 +40,47 @@ def screenToImg(pt,img):
     return (pt[0] * (img.size[0]*1.0/screenWidth), pt[1] * (img.size[1]*1.0/screenHeight))
 
 def getColor(pt, src = None):
-    #click(pt)
+    #click(pt)  
     img = ImageGrab.grab() if src == None else src
     color = img.getpixel(screenToImg(pt,img))
     return color
+
+def BGRInt2RGBTup(bgr):
+    red = bgr & 255
+    green = (bgr>>8) & 255
+    blue = (bgr>>16) & 255
+    return (red,green,blue)
+
+def RGB2HSV(rgb):
+    r = rgb[0]/255
+    g = rgb[1]/255
+    b = rgb[2]/255
+    cmax = max(r,g,b)
+    cmin = min(r,g,b)
+    delta = cmax-cmin
+    s = 0 if cmax == 0 else delta/cmax
+    h = 0
+    if delta != 0:
+        if cmax == r:
+            h = 60 * (((g-b)/delta)%6)
+        elif cmax == g:
+            h = 60 * (((b-r)/delta)+2)
+        else:
+            h = 60 * (((r-g)/delta)+4)
+    return (h,s,cmax)
+
+def getColorWIN32(pt,winDC = defaultDC, screen_dim=(1920,1080), ):
+    x = int(pt[0]*screen_dim[0]/screenWidth)
+    y = int(pt[1]*screen_dim[1]/screenHeight)
+    #return BGRInt2RGBTup(win32gui.GetPixel(win32gui.GetDC(win32gui.GetActiveWindow()), x , y))
+    return BGRInt2RGBTup(win32gui.GetPixel(winDC, x , y))
+
+def PerfTimer(func, times, arg):
+    start = time.perf_counter()
+    for i in range(times):
+        func(arg)
+    end = time.perf_counter()
+    return end - start
 
 def screenToImgRect(pt1, pt2, img):
     img1 = screenToImg(pt1, img)
@@ -65,9 +105,45 @@ def getText(up, down, configs, BL = False, BW = False, show=False, src = None):
     rect = screenToImgRect(up,down,img)
     subimg = toBilateral(img.crop(rect)) if BL == True else img.crop(rect)
     # pre_process subimg
+    # subimg_bw = toThreshold(subimg) if BW == True else toBilateral(subimg)
+    subimg_bw = toThreshold(subimg) if BW == True else subimg
+    if show:
+        subimg.show()
+        subimg_bw.show()
+    text = pytesseract.image_to_string(subimg_bw, config = configs)
+    return text
+
+def getTextNoCrop(src, configs, BL = False, BW = False, show = False):
+    subimg = toBilateral(src) if BL == True else src
     subimg_bw = toThreshold(subimg) if BW == True else toBilateral(subimg)
     if show:
         subimg.show()
         subimg_bw.show()
     text = pytesseract.image_to_string(subimg_bw, config = configs)
     return text
+
+def CalculatePoints(cards):
+    large_sum = 0
+    small_sum = 0
+    seen_ace = False
+    for card in cards:
+        soft_amnt = amnt = card
+        if card % 10 == 1:
+            amnt = soft_amnt = 1
+            if seen_ace == False:
+                soft_amnt += 10
+            seen_ace = True
+        small_sum += amnt
+        large_sum += soft_amnt
+        print(small_sum,large_sum,seen_ace)
+    
+    if seen_ace and large_sum > 21:
+        seen_ace = False 
+        large_sum -= 10
+
+    return seen_ace,max(large_sum,small_sum)
+    
+def Test(cards, TC, split):
+    is_soft, points = CalculatePoints(cards)
+    for i in range(1,11):
+        print(i, Decide(cards, TC, points, i, is_soft, split), is_soft, cards, points)

@@ -86,13 +86,14 @@ def post_process_no_draw(input_image, outputs):
         c_buf.append(classes[class_ids[i]])
     return (b_buf,c_buf)
 
-def post_process_mask(input_image, raw_result):
+def post_process_mask(input_image, raw_result, draw = False):
     # filter outputs
     confidence_mask = (raw_result[0][:,:,4].max(axis=0) > CONFIDENCE_THRESHOLD)
     outputs = raw_result[0][:,confidence_mask,:]
     #print(outputs.shape)
     class_score_mask = (outputs[:,:,5:].max(axis=2) > SCORE_THRESHOLD)[0]
     outputs = outputs[:,class_score_mask,:]
+    
     #print(outputs.shape)
     # Lists to hold respective values while unwrapping.
     class_ids = []
@@ -101,9 +102,11 @@ def post_process_mask(input_image, raw_result):
     # Rows.
     rows = outputs.shape[1]
     image_height, image_width = input_image.shape[:2]
+
     # Resizing factor.
     x_factor = image_width / INPUT_WIDTH
     y_factor =  image_height / INPUT_HEIGHT
+
     # Iterate through detections.
     for r in range(rows):
         row = outputs[0][r]
@@ -122,28 +125,27 @@ def post_process_mask(input_image, raw_result):
         boxes.append(box)
      # Perform non maximum suppression to eliminate redundant, overlapping boxes with lower confidences.
     indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, NMS_THRESHOLD)
-    
-    b_buf = []
-    c_buf = []
-    for i in indices:
-        b_buf.append(boxes[i])
-        c_buf.append(classes[class_ids[i]])
-    return (b_buf,c_buf)
-    '''
-    for i in indices:
-        box = boxes[i]
-        left = box[0]
-        top = box[1]
-        width = box[2]
-        height = box[3]             
-        # Draw bounding box.             
-        cv2.rectangle(input_image, (left, top), (left + width, top + height), BLUE, THICKNESS)
-        # Class label.                      
-        label = "{}:{:.2f}".format(classes[class_ids[i]], confidences[i])             
-        # Draw label.             
-        draw_label(input_image, label, left+width, top+height)
-    return input_image
-    '''
+    if draw:
+        for i in indices:
+            box = boxes[i]
+            left = box[0]
+            top = box[1]
+            width = box[2]
+            height = box[3]             
+            # Draw bounding box.             
+            cv2.rectangle(input_image, (left, top), (left + width, top + height), BLUE, THICKNESS)
+            # Class label.                      
+            label = "{}:{:.2f}".format(classes[class_ids[i]], confidences[i])             
+            # Draw label.             
+            draw_label(input_image, label, left+width, top+height)
+        return input_image
+    else:
+        b_buf = []
+        c_buf = []
+        for i in indices:
+            b_buf.append(boxes[i])
+            c_buf.append(classes[class_ids[i]])
+        return (b_buf,c_buf)
     
 
 def post_process(input_image, outputs):
@@ -194,7 +196,8 @@ def post_process(input_image, outputs):
     return input_image
 
 #net = cv2.dnn.readNet('last.onnx')
-net = cv2.dnn.readNetFromONNX('last40000.onnx')
+#net = cv2.dnn.readNetFromONNX('last40000.onnx')
+net = cv2.dnn.readNetFromONNX('best_4000.onnx')
 def cropAndSave(fname):
     img = Image.open(fname)
     #subimg = img.crop(screenToImgRect(yolo_up,yolo_down,img))
@@ -206,10 +209,10 @@ def predictFromFile(fname, use_mask = True):
     result = predict(canvas, use_mask)
     cv2.imwrite('predict1.png',result)
 
-def inference(canvas):
+def inference(canvas, dnnnet = net):
     blob = cv2.dnn.blobFromImage(canvas, 1/255,(640,640),[0,0,0],1, crop=False)
     #blob = cv2.dnn.blobFromImage(canvas, 1/255,(480,480),[0,0,0],1, crop=False)
-    net.setInput(blob)
+    dnnnet.setInput(blob)
     return net.forward(net.getUnconnectedOutLayersNames())
 
 
@@ -222,7 +225,7 @@ def predict(canvas, use_mask = True):
     r = post_process(canvas.copy(),outputs)
     '''
     #r = post_process(canvas.copy(),inference(canvas))
-    r = post_process_mask(canvas.copy(),inference(canvas)) if use_mask else post_process(canvas.copy(),inference(canvas))
+    r = post_process_mask(canvas.copy(),inference(canvas), True) if use_mask else post_process(canvas.copy(),inference(canvas))
     return r
 
 def cropAndPredict(fname, use_mask = True):

@@ -45,6 +45,15 @@ def getColor(pt, src = None):
     color = img.getpixel(screenToImg(pt,img))
     return color
 
+# Color comparison
+def colorCompare(c1, c2, t, ERR):
+    if t == 'rgb':
+        #print(np.sqrt(sum((c1 - c2)**2)))
+        return np.sqrt(sum((c1 - c2)**2)) < ERR
+    else:
+        #print(c1,c2,t)
+        return abs(c1[t]-c2[t]) < ERR
+
 def BGRInt2RGBTup(bgr):
     red = bgr & 255
     green = (bgr>>8) & 255
@@ -115,7 +124,7 @@ def getText(up, down, configs, BL = False, BW = False, show=False, src = None):
 
 def getTextNoCrop(src, configs, BL = False, BW = False, show = False):
     subimg = toBilateral(src) if BL == True else src
-    subimg_bw = toThreshold(subimg) if BW == True else toBilateral(subimg)
+    subimg_bw = toThreshold(subimg) if BW == True else subimg
     if show:
         subimg.show()
         subimg_bw.show()
@@ -135,7 +144,7 @@ def CalculatePoints(cards):
             seen_ace = True
         small_sum += amnt
         large_sum += soft_amnt
-        print(small_sum,large_sum,seen_ace)
+        #print(small_sum,large_sum,seen_ace)
     
     if seen_ace and large_sum > 21:
         seen_ace = False 

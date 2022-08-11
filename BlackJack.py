@@ -18,7 +18,7 @@ def Decide(cards, true_count, points, dealer_up, is_soft, can_split = True):
                     return 'p'
                 if dealer_up == 2 and true_count >= 3:
                     return 's'
-            if card == 7 and deal_up <= 7 and deal_up >= 2:
+            if card == 7 and dealer_up <= 7 and dealer_up >= 2:
                 return 'p'
             if card == 8 or card == 1 or card == 11:
                 return 'p'

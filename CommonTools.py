@@ -1,5 +1,5 @@
 from ctypes import windll, Structure, c_long, byref
-import win32api, win32con, re, winsound, win32gui
+import win32api, win32con, re, winsound, win32gui, win32console
 from pytesseract import pytesseract
 import numpy as np
 import cv2, time
@@ -18,6 +18,10 @@ tconfig = "-c tessedit_char_whitelist=0123456789/ --psm 9"
 # setup tesseract
 pytesseract.tesseract_cmd = "tesseract.exe"
 
+# a dictionary of all window and their hwnd, key is window name
+window_tups = []
+window_search_cache = {}
+
 class POINT(Structure):
     _fields_ = [("x", c_long), ("y", c_long)]
 
@@ -33,9 +37,46 @@ def click(pt):
 
 def getWindow(pt):
     click(pt)
-    sleep(0.1)
+    time.sleep(0.1)
     return win32gui.GetForegroundWindow()
 
+def SetupAllWindowHWND():
+    window_tups.clear()
+    window_search_cache.clear()
+    def windowEnumHandler(hwnd, top_windows):
+        top_windows.append((hwnd,win32gui.GetWindowText(hwnd)))
+    win32gui.EnumWindows(windowEnumHandler, window_tups)
+
+def GetHWNDByKeyword(keyword):
+    # check if we initialized all windows
+    if len(window_tups) == 0:
+        SetupAllWindowHWND()
+    
+    hwnd = window_search_cache.get(keyword)
+
+    # if didn't find in cache, do a loop search.
+    if hwnd == None:
+        for i in window_tups:
+            if keyword.lower() in i[1].lower():
+                hwnd = i[0]
+                window_search_cache[keyword] = hwnd
+                break
+    return hwnd
+
+def SetFrontWindowByKeyword(keyword):
+    hwnd = GetHWNDByKeyword(keyword)
+    if hwnd == None:
+        print("Failed to find window by keyword:", keyword)
+        return False
+
+    win32gui.SetForegroundWindow(hwnd)
+    return True
+
+def MoveConsoleToFront():
+    win32gui.ShowWindow(win32console.GetConsoleWindow(),2)
+    win32gui.ShowWindow(win32console.GetConsoleWindow(),1)
+
+ 
 def screenToImg(pt,img):
     return (pt[0] * (img.size[0]*1.0/screenWidth), pt[1] * (img.size[1]*1.0/screenHeight))
 
@@ -156,3 +197,16 @@ def Test(cards, TC, split):
     is_soft, points = CalculatePoints(cards)
     for i in range(1,11):
         print(i, Decide(cards, TC, points, i, is_soft, split), is_soft, cards, points)
+
+def TestWindows():
+    while True:
+        SetFrontWindowByKeyword("pywin32")
+        time.sleep(0.05)
+        pos = queryPos()
+        color = getColorWIN32(pos)
+        if color[0] < 128:
+            print(color)
+            break
+        console_window = win32console.GetConsoleWindow()
+        print("console window:",console_window)
+        win32gui.SetForegroundWindow(console_window)

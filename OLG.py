@@ -224,7 +224,7 @@ class AutoPlay:
 
     def State0(self):
         while True:
-            # Copare color with win32 api, compare by hue, with error = 10 degree.
+            # Compare color using win32 api, compare by hue, with error = 10 degree.
             if self.pixelPollerWIN32(greenTimerPos, greenTimerColorHSV, 0 ,5):
                 print("Saw Green, switch state to 1")
                 self.state = 1
@@ -245,10 +245,13 @@ class AutoPlay:
 
         # State Changer
         State2Ready = False
+
+        # Flag for Yellow Card
+        YellowDetected = False
         # Loop
         while True:
         # check for yellow card, if saw, reset card count, remake bet
-            if self.pixelPollerWIN32(CentralPoint, CentralYellowHSV, 0, 3) and self.pixelPollerWIN32(CentralPoint, CentralYellow, 'rgb', 20):
+            if YellowDetected == False and self.pixelPollerWIN32(CentralPoint, CentralYellowHSV, 0, 3) and self.pixelPollerWIN32(CentralPoint, CentralYellow, 'rgb', 20):
                 self.cardCounter.Reset()
                 self.bet_deviation -= self.last_bet
                 self.last_bet = self.cardCounter.GetBet(self.BettingPortion)
@@ -256,6 +259,8 @@ class AutoPlay:
                 # Reset Bet
                 self.ResetBet(clicks)
                 self.MakeBet(self.last_bet)
+                # mark the flag as true so that it doesn't repeatedly reseting bet
+                YellowDetected = True
             # check for yellow timer, if saw go to state 2
             if self.pixelPollerWIN32(yellowTimerPos, yellowTimerColorHSV, 0, 5):
                 State2Ready = True

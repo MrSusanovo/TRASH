@@ -47,3 +47,6 @@ Bet5 = (695,426)
 Bet1 = (670,438)
 ChipSlot = (761,678)
 BetUndo = (627,435)
+
+# Window Names
+OLG_WINDOW = "OLG Live Casino"

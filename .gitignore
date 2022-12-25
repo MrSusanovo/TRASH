@@ -1,1 +1,10 @@
 *.png
+*.mp4
+__pycache__/*
+*.zip
+*.jpg
+*.jpeg
+*.tgz
+Data/*
+*.txt
+*.csv

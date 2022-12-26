@@ -25,3 +25,14 @@ class TextOverlay:
         self.label.config(text=t)
         self.root.update()
         self.MoveToFront()
+
+class OLGOverlay():
+    def __init__(self):
+        self.TextOverlay = TextOverlay()
+        self.data = {"rc":0,"tc":0,"remaining":0,"bet":0,"fund":0,"state":0,"detect":None,"count":None,"action":None}
+        self.OLGFormat = f"RC: {rc}, TC: {tc}, Remain: {remaining}\nBet:{bet}, Fund:{fund}, State:{state}\nDetect:{detect}, Count:{count}, Action:{action}"
+
+    def Update(self):
+        self.TextOverlay.Print(self.OLGFormat.format(**self.data))
+    def destroy(self):
+        self.TextOverlay.destroy()

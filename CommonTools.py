@@ -5,6 +5,7 @@ import numpy as np
 import cv2, time
 from PIL import ImageGrab, Image
 from BlackJack import *
+import inspect
 
 # Screen Dimension
 screenWidth = windll.user32.GetSystemMetrics(0)
@@ -210,3 +211,6 @@ def TestWindows():
         console_window = win32console.GetConsoleWindow()
         print("console window:",console_window)
         win32gui.SetForegroundWindow(console_window)
+
+def GetCaller(index = 1):
+    return inspect.stack()[index].function

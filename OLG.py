@@ -140,7 +140,7 @@ class CardCounter:
     
 
 class AutoPlay:
-    def __init__(self, balance):
+    def __init__(self, balance, overlay = None):
         self.state = 0
         self.dimScreen = ImageGrab.grab()
         # convert coordinate from mouse to screen
@@ -168,10 +168,28 @@ class AutoPlay:
         # Init the game
         self.InitStateMachine()
 
+        # Init On Screen Debug Overlay
+        self.overlay = overlay
+        self.overlay_data = {"rc":0,"tc":0,"remaining":0,"bet":0,"fund":0,"state":0,"detect":None,"count":None,"action":None}
+
+    def UpdateOverlayData(self):
+        self.overlay_data['rc'] = self.cardCounter.running_count
+        self.overlay_data['tc'] = self.cardCounter.GetTCount()
+        self.overlay_data['remaining'] = self.cardCounter.total_cards
+        self.overlay_data['bet'] = self.last_bet
+        self.overlay_data['fund'] = self.balance
+        self.overlay_data['state'] = self.state
+        self.overlay_data['detect'] = self.cardCounter.buffer_card
+        self.overlay_data['count'] = self.cardCounter.running_count
+
+        if self.overlay != None:
+            self.overlay.Update()
+
     # Init State machine actions
     def InitStateMachine(self):
         self.state = 0 
-        self.actions = [self.State0, self.State1, self.State2, self.State3, self.State4, self.State5, self.State6, self.State7]
+        self.actions = [self.StartOfRound, self.InitialBet, self.First2Cards, self.Insruance, self.InitialDecision, self.State5, self.SplitBet, self.EndOfRound]
+        self.UpdateOverlayData()
     
     
     # input color should be np array for rgb, normal tuple for hsv
@@ -222,14 +240,14 @@ class AutoPlay:
         return clicks
         
 
-    def State0(self):
+    def StartOfRound(self):
         while True:
             # Compare color using win32 api, compare by hue, with error = 10 degree.
             if self.pixelPollerWIN32(greenTimerPos, greenTimerColorHSV, 0 ,5):
                 print("Saw Green, switch state to 1")
                 self.state = 1
                 break
-    def State1(self):
+    def InitialBet(self):
         # Read in new balance.
         balance_text = getText(rectBalance.p1, rectBalance.p2,'-c tessedit_char_whitelist=0123456789., --psm 6')[:-1].replace(',','')
         balance = float(balance_text)
@@ -280,7 +298,7 @@ class AutoPlay:
             new_point = int(my_text)
         return new_point
         
-    def State2(self):
+    def First2Cards(self):
         TimeStamp = 0
         # Count Cards and detect dealer card in a loop
         while True:
@@ -288,17 +306,17 @@ class AutoPlay:
             if len(self.my_cards) == 2 and len(self.dealer_cards) == 1:
                 # if dealer got ace but I didn't get blackjack, goto insurance state
                 if self.dealer_point == 11 or self.dealer_point == 1:
-                    print("State 2: Dealer got Ace. Got to state 3.")
+                    print("First2Cards: Dealer got Ace. Got to state 3.")
                     self.state = 3
                     break
                 # if I got blackjack, go to state 7 
                 if self.my_point == 21:
-                    print("State 2: I got black jack! Go to state 7.")
+                    print("First2Cards: I got black jack! Go to state 7.")
                     self.state = 7
                     self.bet_deviation += 0.5 * self.last_bet
                     break
                 # otherwise go to state 4
-                print("State 2: go to state 4")
+                print("First2Cards: go to InitialDecision")
                 self.state = 4
                 break
             
@@ -363,12 +381,12 @@ class AutoPlay:
                 # count dealer's card
                 self.cardCounter.Count(new_point)
 
-
+            self.UpdateOverlayData()
             # check if I got blackjack, state to 7
             # check if dealer got ace, or I got 2 cards but still can't get dealer's card check if insurance option provided, go to state 3 and break
             # if so change state 
             # else keep polling until we got 2 cards and dealer got 1, change state to 4
-    def State3(self):
+    def Insruance(self):
         # take insurance on TC 3+
         tc = self.cardCounter.GetTCount()
         if tc >= 3:
@@ -381,20 +399,20 @@ class AutoPlay:
         print("State 3: go to state 4")
         self.state = 4
 
-    def State4(self):
+    def InitialDecision(self):
         # need to get the memory from state 2
         button = None
         while True:
             # make decision
             TC = self.cardCounter.GetTCount()
             decision = Decide(self.my_cards, TC, self.my_point, self.dealer_point, self.is_soft)
-            print("State 4: Decision:",decision)
-            if decision == 's':
+            print("InitialDecision:",decision)
+            if decision == 's': # stand
                 # stand go to 5
                 self.state = 5
                 if self.my_point == 21:
                     break
-            elif decision == 'p':
+            elif decision == 'p': # split
                 self.bet_deviation += self.last_bet
                 if self.my_cards[0] == 11 or self.my_cards[1] == 1:
                     self.ClickButton(decision)
@@ -404,10 +422,10 @@ class AutoPlay:
                 self.slot2.append(self.my_cards[1])
                 self.my_cards.clear()
                 self.state = 6
-            elif decision == 'd':
+            elif decision == 'd': # double down
                 self.bet_deviation += self.last_bet
                 self.state = 5
-            elif decision == 'b':
+            elif decision == 'b': # busted
                 # busted
                 self.state = 5
                 break
@@ -418,7 +436,7 @@ class AutoPlay:
                     break
                 
             self.ClickButton(decision)
-            if decision != 'h':
+            if decision != 'h': # hit
                 break
             # Only hit will hit this part.
             while decision == 'h':
@@ -439,7 +457,7 @@ class AutoPlay:
                     print("State 4: yolo got card:", new_card, "My cards:", self.my_cards) 
                     self.is_soft, self.my_point = CalculatePoints(self.my_cards)
                     break
-        print("State 4: go to state:", self.state)
+        print("InitialDecision: go to state:", self.state)
         # split go to 6
         # count 
         # bust, double split on ace  go to 5
@@ -486,7 +504,7 @@ class AutoPlay:
                 '''
         
     
-    def State6(self):
+    def SplitBet(self):
         # need to get the memory from state 4
         # wait for my new card
         slot_index = 0
@@ -521,7 +539,8 @@ class AutoPlay:
         # make dicision
         # 2 slots with any of stand, double, bust go to 5
     
-    def State7(self):
+    def EndOfRound(self):
+        reset_card_counter = False
         while True:
             img = ImageGrab.grab()
             # crop the text part 
@@ -533,17 +552,17 @@ class AutoPlay:
             if new_point != self.dealer_point and new_point != 0 and new_point != 1:
                 new_card = ((new_point - self.dealer_point) + 10) % 10
                 new_card += 10 if new_card == 0 else 0
-                print("State 7: dealer got card:", new_card)
+                print("EndOfRound: dealer got card:", new_card)
                 self.dealer_cards.append(new_card)
                 self.cardCounter.Count(new_card)
                 self.dealer_point = new_point
             # pixel check yellow end of deck card
             if self.pixelPoller(CentralPoint, CentralYellowHSV, 0, 3, img) and self.pixelPoller(CentralPoint, CentralYellow, 'rgb', 20, img):
-                print("State 7: saw yellow card, reset card counter")
-                self.cardCounter.Reset()
-            # pixel check green timer and go to state 1
+                print("EndOfRound: saw yellow card, reset card counter after clearing")
+                reset_card_counter = True
+            # pixel check green timer and go to InitialBet(1)
             if self.pixelPoller(greenTimerPos, greenTimerColorHSV, 0, 5, img):
-                print("State 7: saw green timer, goto state 1")
+                print("EndOfRound: saw green timer, goto InitialBet")
                 self.state = 1
                 self.dealer_point = 0
                 self.dealer_cards.clear()
@@ -553,6 +572,10 @@ class AutoPlay:
                 self.my_point = 0
                 self.is_soft = False
                 break
+        
+        if reset_card_counter:
+            self.cardCounter.Reset()
+        self.UpdateOverlayData()
     def ClickButton(self,decision):
         # Skipt for busted
         if decision == 'b':

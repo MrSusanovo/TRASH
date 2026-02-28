@@ -188,7 +188,7 @@ class AutoPlay:
     # Init State machine actions
     def InitStateMachine(self):
         self.state = 0 
-        self.actions = [self.StartOfRound, self.InitialBet, self.First2Cards, self.Insruance, self.InitialDecision, self.State5, self.SplitBet, self.EndOfRound]
+        self.actions = [self.StartOfRound, self.InitialBet, self.First2Cards, self.Insruance, self.InitialDecision, self.EndOfPlayersDecision, self.SplitBet, self.EndOfRound]
         self.UpdateOverlayData()
     
     
@@ -461,7 +461,7 @@ class AutoPlay:
         # split go to 6
         # count 
         # bust, double split on ace  go to 5
-    def State5(self):
+    def EndOfPlayersDecision(self):
         Init = False
         while True:
             # keep count cards
@@ -481,7 +481,7 @@ class AutoPlay:
             if False == self.pixelPollerWIN32(dealerHolePos,dealerHoleColor,'rgb', 30) and Init == True:
                 print(getColorWIN32(dealerHolePos), dealerHoleColor)
                 # flipped go to 7
-                print("State 5: dealer flipped card, goto state 7")
+                print("EndOfPlayersDecision: dealer flipped card, goto EndOfRound")
                 self.cardCounter.ClearBuffer()
                 self.state = 7
                 break

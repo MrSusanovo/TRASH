@@ -1,0 +1,10 @@
+numpy>=1.21
+opencv-python>=4.5
+Pillow>=8.0
+pytesseract>=0.3.10
+pywin32>=302
+matplotlib>=3.4
+
+# System / platform packages required by some modules (not installable via pip)
+# - tkinter: GUI used by `TKTextOverlay.py` (Windows typically includes it; on Linux install `python3-tk`).
+# - Tesseract OCR engine: `pytesseract` requires the `tesseract` binary installed separately.
